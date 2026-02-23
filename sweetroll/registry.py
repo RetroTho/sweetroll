@@ -8,7 +8,7 @@ from io import BytesIO
 
 from sweetroll.loader import _USER_DIR
 
-REGISTRY_URL = "https://raw.githubusercontent.com/sweetroll/registry/main/registry.json"
+REGISTRY_URL = "https://raw.githubusercontent.com/RetroTho/sweetroll-registry/main/registry.json"
 
 
 def _fetch_registry() -> dict:
