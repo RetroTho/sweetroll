@@ -200,6 +200,8 @@ class Editor:
         hook_handled = _dispatch("key", {"api": self.api, "key": key})
 
         if key == _KEY_QUIT:
+            if _dispatch("before_quit", {"api": self.api}):
+                return True  # A hook cancelled quit
             return "quit"
         if key == _KEY_SAVE:
             save_payload = {"api": self.api}
