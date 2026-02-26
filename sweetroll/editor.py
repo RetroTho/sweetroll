@@ -118,6 +118,7 @@ class Editor:
         self.api: EditorAPI | None = None
 
     def _init_curses(self, win):
+        curses.raw()
         curses.curs_set(1)
         curses.use_default_colors()
         curses.start_color()
