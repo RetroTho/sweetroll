@@ -121,6 +121,7 @@ class Editor:
         curses.curs_set(1)
         curses.use_default_colors()
         curses.start_color()
+        curses.set_escdelay(25)
         win.keypad(True)
         self.win = win
 
