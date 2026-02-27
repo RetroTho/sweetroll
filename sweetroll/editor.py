@@ -2,6 +2,10 @@
 
 Contains the Buffer (document model), the hook system (how extensions plug in),
 and the Editor (main loop, rendering, and keyboard handling).
+
+"curses" is a Python library for building text-based terminal interfaces.
+It lets you draw text at specific positions on the screen, read keypresses,
+and use colors — everything you need for a terminal text editor.
 """
 
 import curses
@@ -14,6 +18,9 @@ from sweetroll.api import EditorAPI
 KEY_QUIT = 17          # Ctrl+Q
 KEY_SAVE = 19          # Ctrl+S
 KEY_TAB = 9
+
+# Some keys can produce different codes depending on the terminal,
+# so we check against a set of possible values.
 KEY_ENTER_CODES = {curses.KEY_ENTER, 10, 13}
 BACKSPACE_CODES = {curses.KEY_BACKSPACE, 127}
 
@@ -26,18 +33,25 @@ class Buffer:
     """A single document: a list of text lines plus a cursor position.
 
     Lines are stored as a plain Python list of strings (one per line).
-    Row and column are 0-based (row 0 is the first line, col 0 is the first character).
+    Row and column are 0-based (row 0 is the first line, col 0 is the first
+    character).
     """
 
     def __init__(self, path=None):
         self.path = path
-        if path and path.exists():
-            self.lines = path.read_text().splitlines() or [""]
-        else:
-            self.lines = [""]
         self.row = 0
         self.col = 0
         self.dirty = False
+
+        # Load the file from disk, or start with one empty line
+        if path and path.exists():
+            text = path.read_text()
+            self.lines = text.splitlines()
+            # If the file was completely empty, start with one blank line
+            if not self.lines:
+                self.lines = [""]
+        else:
+            self.lines = [""]
 
     def clamp_cursor(self):
         """Make sure the cursor is inside the buffer bounds.
@@ -45,15 +59,19 @@ class Buffer:
         If the cursor row is past the last line, move it back.
         If the cursor column is past the end of the current line, move it back.
         """
-        self.row = max(0, min(self.row, len(self.lines) - 1))
-        self.col = max(0, min(self.col, len(self.lines[self.row])))
+        last_row = len(self.lines) - 1
+        self.row = max(0, min(self.row, last_row))
 
-    def insert_char(self, ch):
+        last_col = len(self.lines[self.row])
+        self.col = max(0, min(self.col, last_col))
+
+    def insert_char(self, char):
         """Insert a character (or short string like 4 spaces for Tab) at the cursor."""
         line = self.lines[self.row]
-        # Splice the new character(s) into the line at the cursor position
-        self.lines[self.row] = line[:self.col] + ch + line[self.col:]
-        self.col += len(ch)
+        before = line[:self.col]
+        after = line[self.col:]
+        self.lines[self.row] = before + char + after
+        self.col += len(char)
         self.dirty = True
 
     def backspace(self):
@@ -61,7 +79,9 @@ class Buffer:
         if self.col > 0:
             # Remove one character to the left of the cursor
             line = self.lines[self.row]
-            self.lines[self.row] = line[:self.col - 1] + line[self.col:]
+            before = line[:self.col - 1]
+            after = line[self.col:]
+            self.lines[self.row] = before + after
             self.col -= 1
             self.dirty = True
         elif self.row > 0:
@@ -77,7 +97,9 @@ class Buffer:
         line = self.lines[self.row]
         if self.col < len(line):
             # Remove the character right at the cursor
-            self.lines[self.row] = line[:self.col] + line[self.col + 1:]
+            before = line[:self.col]
+            after = line[self.col + 1:]
+            self.lines[self.row] = before + after
             self.dirty = True
         elif self.row < len(self.lines) - 1:
             # At the end of a line: pull the next line up onto this one
@@ -89,9 +111,10 @@ class Buffer:
         """Split the current line at the cursor (like pressing Enter)."""
         line = self.lines[self.row]
         # Everything after the cursor becomes a new line below
-        tail = line[self.col:]
-        self.lines[self.row] = line[:self.col]
-        self.lines.insert(self.row + 1, tail)
+        before = line[:self.col]
+        after = line[self.col:]
+        self.lines[self.row] = before
+        self.lines.insert(self.row + 1, after)
         self.row += 1
         self.col = 0
         self.dirty = True
@@ -100,14 +123,18 @@ class Buffer:
         """Write the buffer to disk. Returns False if there is no file path."""
         if not self.path:
             return False
-        self.path.write_text("\n".join(self.lines) + "\n")
+        text = "\n".join(self.lines) + "\n"
+        self.path.write_text(text)
         self.dirty = False
         return True
 
     def load(self, path):
         """Replace the buffer contents with a file from disk."""
         self.path = path
-        self.lines = path.read_text().splitlines() or [""]
+        text = path.read_text()
+        self.lines = text.splitlines()
+        if not self.lines:
+            self.lines = [""]
         self.row = 0
         self.col = 0
         self.dirty = False
@@ -135,6 +162,7 @@ def register_hook(priority, callback, event=None):
                 if None, the hook is called for every event
     """
     _hooks.append((priority, callback, event))
+    # Keep the list sorted so lower-priority hooks always run first
     _hooks.sort(key=lambda entry: entry[0])
 
 
@@ -144,15 +172,21 @@ def _dispatch(event, payload):
     If any hook returns True, we stop early and return True (meaning
     "this event was handled, don't do the default behavior").
     """
-    for _, callback, hook_event in _hooks:
+    for _priority, callback, hook_event in _hooks:
         # Skip hooks that are registered for a different event
         if hook_event is not None and hook_event != event:
             continue
+
+        # Call the hook inside a try/except so one broken extension
+        # doesn't crash the entire editor
         try:
-            if callback(event, payload) is True:
+            result = callback(event, payload)
+            if result is True:
                 return True
-        except Exception as e:
-            print(f"sweetroll: warning: hook error on '{event}': {e}", file=sys.stderr)
+        except Exception as err:
+            print(f"sweetroll: warning: hook error on '{event}': {err}",
+                  file=sys.stderr)
+
     return False
 
 
@@ -169,10 +203,12 @@ class Editor:
         self.scroll_y = 0        # which line is at the top of the screen
         self.scroll_x = 0        # horizontal scroll offset
         self.message = ""        # one-line message (shown by status-bar extension)
-        # Layout: extensions can request header/footer rows and left/right columns.
-        # These dicts are recalculated every frame.
+
+        # Layout: extensions can request header/footer rows and left/right
+        # columns.  These dicts are recalculated every frame.
         self.layout_request = {"header": 0, "footer": 0, "left": 0, "right": 0}
         self.layout_rects = {}
+
         self.win = None          # the curses window (set in _init_curses)
         self.api = None          # the EditorAPI wrapper (set in run)
 
@@ -202,13 +238,16 @@ class Editor:
         self.layout_request = {"header": 0, "footer": 0, "left": 0, "right": 0}
         _dispatch("layout", {"api": self.api})
 
-        # Cap each region so the content area always gets at least 1 row and 1 column
+        # Cap each region so the content area always gets at least 1 row
         header_rows = min(self.layout_request["header"], screen_height - 2)
-        footer_rows = min(self.layout_request["footer"], screen_height - header_rows - 1)
+        footer_rows = min(self.layout_request["footer"],
+                          screen_height - header_rows - 1)
         content_height = screen_height - header_rows - footer_rows
 
+        # Cap each region so the content area always gets at least 1 column
         left_cols = min(self.layout_request["left"], screen_width - 2)
-        right_cols = min(self.layout_request["right"], screen_width - left_cols - 1)
+        right_cols = min(self.layout_request["right"],
+                         screen_width - left_cols - 1)
         content_width = screen_width - left_cols - right_cols
 
         # Safety: if the terminal is tiny, force at least 1 row/col for content
@@ -219,12 +258,38 @@ class Editor:
             content_width = 1
             right_cols = screen_width - left_cols - 1
 
-        # Store each region as (y, x, height, width) — or None if that region is empty
-        self.layout_rects["content_rect"] = (header_rows, left_cols, content_height, content_width)
-        self.layout_rects["header_rect"] = (0, 0, header_rows, screen_width) if header_rows else None
-        self.layout_rects["footer_rect"] = (screen_height - footer_rows, 0, footer_rows, screen_width) if footer_rows else None
-        self.layout_rects["left_rect"] = (header_rows, 0, content_height, left_cols) if left_cols else None
-        self.layout_rects["right_rect"] = (header_rows, screen_width - right_cols, content_height, right_cols) if right_cols else None
+        # Store each region as (y, x, height, width) — or None if empty
+        self.layout_rects["content_rect"] = (
+            header_rows, left_cols, content_height, content_width
+        )
+
+        if header_rows:
+            self.layout_rects["header_rect"] = (
+                0, 0, header_rows, screen_width
+            )
+        else:
+            self.layout_rects["header_rect"] = None
+
+        if footer_rows:
+            self.layout_rects["footer_rect"] = (
+                screen_height - footer_rows, 0, footer_rows, screen_width
+            )
+        else:
+            self.layout_rects["footer_rect"] = None
+
+        if left_cols:
+            self.layout_rects["left_rect"] = (
+                header_rows, 0, content_height, left_cols
+            )
+        else:
+            self.layout_rects["left_rect"] = None
+
+        if right_cols:
+            self.layout_rects["right_rect"] = (
+                header_rows, screen_width - right_cols, content_height, right_cols
+            )
+        else:
+            self.layout_rects["right_rect"] = None
 
     # -- Scrolling --
 
@@ -253,32 +318,42 @@ class Editor:
 
     def _draw_text(self):
         """Draw the visible portion of the buffer into the content area."""
-        content_y, content_x, content_height, content_width = self.layout_rects["content_rect"]
-        for i in range(content_height):
-            line_index = self.scroll_y + i
-            if line_index < len(self.buffer.lines):
-                # Slice the line to only the horizontally visible portion
-                visible_text = self.buffer.lines[line_index][self.scroll_x:self.scroll_x + content_width]
-                try:
-                    self.win.addstr(content_y + i, content_x, visible_text)
-                except curses.error:
-                    pass
+        content_y, content_x, content_height, content_width = (
+            self.layout_rects["content_rect"]
+        )
+
+        for screen_row in range(content_height):
+            line_index = self.scroll_y + screen_row
+
+            # Only draw if this line exists in the buffer
+            if line_index >= len(self.buffer.lines):
+                continue
+
+            # Slice the line to only the horizontally visible portion
+            full_line = self.buffer.lines[line_index]
+            visible_text = full_line[self.scroll_x:self.scroll_x + content_width]
+
+            # curses can throw an error if we try to write past the edge
+            # of the screen, so we wrap it in try/except
+            try:
+                self.win.addstr(content_y + screen_row, content_x, visible_text)
+            except curses.error:
+                pass
 
     def _position_cursor(self):
         """Move the terminal cursor to match the buffer cursor position."""
         content_y, content_x, _, _ = self.layout_rects["content_rect"]
+        cursor_y = content_y + (self.buffer.row - self.scroll_y)
+        cursor_x = content_x + (self.buffer.col - self.scroll_x)
         try:
-            self.win.move(
-                content_y + (self.buffer.row - self.scroll_y),
-                content_x + (self.buffer.col - self.scroll_x),
-            )
+            self.win.move(cursor_y, cursor_x)
         except curses.error:
             pass
 
     # -- Render pipeline --
 
     def redraw(self):
-        """One frame of the render pipeline: layout → scroll → draw → refresh."""
+        """One frame of the render pipeline: layout -> scroll -> draw -> refresh."""
         screen_height, screen_width = self.win.getmaxyx()
         self.buffer.clamp_cursor()
 
@@ -329,23 +404,32 @@ class Editor:
 
         # --- Cursor movement ---
 
-        if key == curses.KEY_UP and self.buffer.row > 0:
-            self.buffer.row -= 1
-            self.buffer.clamp_cursor()
+        if key == curses.KEY_UP:
+            if self.buffer.row > 0:
+                self.buffer.row -= 1
+                self.buffer.clamp_cursor()
             return True
-        if key == curses.KEY_DOWN and self.buffer.row < len(self.buffer.lines) - 1:
-            self.buffer.row += 1
-            self.buffer.clamp_cursor()
+
+        if key == curses.KEY_DOWN:
+            if self.buffer.row < len(self.buffer.lines) - 1:
+                self.buffer.row += 1
+                self.buffer.clamp_cursor()
             return True
-        if key == curses.KEY_LEFT and self.buffer.col > 0:
-            self.buffer.col -= 1
+
+        if key == curses.KEY_LEFT:
+            if self.buffer.col > 0:
+                self.buffer.col -= 1
             return True
-        if key == curses.KEY_RIGHT and self.buffer.col < len(self.buffer.lines[self.buffer.row]):
-            self.buffer.col += 1
+
+        if key == curses.KEY_RIGHT:
+            if self.buffer.col < len(self.buffer.lines[self.buffer.row]):
+                self.buffer.col += 1
             return True
+
         if key == curses.KEY_HOME:
             self.buffer.col = 0
             return True
+
         if key == curses.KEY_END:
             self.buffer.col = len(self.buffer.lines[self.buffer.row])
             return True
@@ -355,12 +439,15 @@ class Editor:
         if key in BACKSPACE_CODES:
             self.buffer.backspace()
             return True
+
         if key == curses.KEY_DC:
             self.buffer.delete_char()
             return True
+
         if key in KEY_ENTER_CODES:
             self.buffer.enter()
             return True
+
         if key == KEY_TAB:
             self.buffer.insert_char("    ")
             return True
@@ -375,30 +462,37 @@ class Editor:
 
     # -- Main loop --
 
+    def _curses_main(self, win):
+        """The function passed to curses.wrapper.  Sets up the editor, then
+        loops: draw the screen, wait for a key, handle it, repeat."""
+        self._init_curses(win)
+        self.api = EditorAPI(editor=self)
+        _dispatch("init", {"api": self.api})
+
+        while True:
+            self.redraw()
+            # getch() blocks until the user presses a key, then returns
+            # an integer key code
+            key = win.getch()
+            result = self.on_key(key)
+            if result == "quit":
+                break
+
+        _dispatch("shutdown", {"api": self.api})
+
     def run(self):
         """Start the editor inside curses and loop until the user quits."""
-        def main(win):
-            self._init_curses(win)
-            self.api = EditorAPI(editor=self)
-            _dispatch("init", {"api": self.api})
-
-            # Main loop: draw the screen, wait for a key, handle it, repeat
-            while True:
-                self.redraw()
-                key = win.getch()
-                result = self.on_key(key)
-                if result == "quit":
-                    break
-
-            _dispatch("shutdown", {"api": self.api})
-
         try:
             # curses.wrapper handles setting up and tearing down the terminal
-            curses.wrapper(main)
+            curses.wrapper(self._curses_main)
         except KeyboardInterrupt:
             pass
 
 
 def run(path=None):
     """Run the editor.  *path* is an optional file to open."""
-    Editor(Path(path).resolve() if path else None).run()
+    if path:
+        resolved = Path(path).resolve()
+    else:
+        resolved = None
+    Editor(resolved).run()

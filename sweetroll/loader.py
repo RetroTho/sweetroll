@@ -9,6 +9,8 @@ Extensions can be either:
   - A single .py file               (single-file extension)
 """
 
+# importlib.util lets us import Python files by file path at runtime,
+# which is how we load extensions that aren't part of the sweetroll package.
 import importlib.util
 import json
 import sys
@@ -30,7 +32,9 @@ def _import_and_setup(module_name, file_path, display_name):
     extensions.  If anything goes wrong (bad import, missing setup function,
     setup error), a warning is printed to stderr and the extension is skipped.
     """
-    # Dynamically import the file
+    # Step 1: dynamically import the file as a Python module.
+    # This is like writing "import some_extension" but for a file path
+    # that we only know at runtime.
     try:
         spec = importlib.util.spec_from_file_location(module_name, file_path)
         if spec is None or spec.loader is None:
@@ -38,29 +42,33 @@ def _import_and_setup(module_name, file_path, display_name):
         mod = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = mod
         spec.loader.exec_module(mod)
-    except Exception as e:
+    except Exception as err:
         sys.modules.pop(module_name, None)
-        print(f"sweetroll: warning: error loading {display_name}: {e}", file=sys.stderr)
+        print(f"sweetroll: warning: error loading {display_name}: {err}",
+              file=sys.stderr)
         return
 
-    # Look for a setup() function
+    # Step 2: look for a setup() function in the extension
     setup = getattr(mod, "setup", None)
     if not callable(setup):
-        print(f"sweetroll: warning: {display_name} has no setup() function, skipping", file=sys.stderr)
+        print(f"sweetroll: warning: {display_name} has no setup() function, skipping",
+              file=sys.stderr)
         return
 
-    # Call setup so the extension can register its hooks
+    # Step 3: call setup so the extension can register its hooks
     try:
         setup(register_hook)
-    except Exception as e:
-        print(f"sweetroll: warning: {display_name}.setup() failed: {e}", file=sys.stderr)
+    except Exception as err:
+        print(f"sweetroll: warning: {display_name}.setup() failed: {err}",
+              file=sys.stderr)
 
 
 def _load_extension(ext_dir):
     """Load a directory-based extension (one with an __init__.py)."""
     init_file = ext_dir / "__init__.py"
     if not init_file.exists():
-        print(f"sweetroll: warning: {ext_dir.name}/ has no __init__.py, skipping", file=sys.stderr)
+        print(f"sweetroll: warning: {ext_dir.name}/ has no __init__.py, skipping",
+              file=sys.stderr)
         return
     _import_and_setup(f"sweetroll_ext_{ext_dir.name}", init_file, ext_dir.name)
 
@@ -87,6 +95,9 @@ def _read_deps():
 def _sort_by_deps(names, deps):
     """Sort extension names so dependencies come before the extensions that need them.
 
+    For example, if "clipboard" depends on "selection", then "selection" must
+    appear before "clipboard" in the result.
+
     Uses a depth-first walk through the dependency graph.  Extensions that
     aren't mentioned in the deps manifest keep their original (alphabetical)
     order and are placed after all dependency-tracked extensions.
@@ -94,20 +105,23 @@ def _sort_by_deps(names, deps):
     order = []
     visited = set()
 
-    def walk(name):
+    def add_with_deps(name):
+        """Add *name* to the order list, but first add all of its dependencies."""
         if name in visited:
             return
         visited.add(name)
-        # Load this extension's dependencies first (recursively)
+
+        # Recursively add this extension's dependencies first
         for dep in deps.get(name, []):
             if dep in names:
-                walk(dep)
+                add_with_deps(dep)
+
         order.append(name)
 
     # Phase 1: process extensions that have dependency info
     for name in names:
         if name in deps:
-            walk(name)
+            add_with_deps(name)
 
     # Phase 2: append the rest in alphabetical order
     for name in names:
@@ -126,21 +140,23 @@ def load_extensions():
     if not _USER_DIR.is_dir():
         return
 
-    # Discover installed extensions by scanning the extensions directory
+    # Step 1: scan the extensions directory to find installed extensions
     entries = {}
     for entry in sorted(_USER_DIR.iterdir()):
         # Skip hidden files and __pycache__ etc.
         if entry.name.startswith((".", "__")):
             continue
+
         if entry.is_dir():
             entries[entry.name] = entry
         elif entry.suffix == ".py":
             entries[entry.stem] = entry
 
-    # Sort so dependencies load first, then load each one
+    # Step 2: sort so dependencies load first
     deps = _read_deps()
     load_order = _sort_by_deps(list(entries.keys()), deps)
 
+    # Step 3: load each extension
     for name in load_order:
         path = entries[name]
         if path.is_dir():

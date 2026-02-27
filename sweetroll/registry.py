@@ -25,8 +25,8 @@ def _fetch_registry():
     try:
         with urllib.request.urlopen(REGISTRY_URL, timeout=10) as resp:
             return json.loads(resp.read())
-    except Exception as e:
-        print(f"sweetroll: error fetching registry: {e}", file=sys.stderr)
+    except Exception as err:
+        print(f"sweetroll: error fetching registry: {err}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -37,12 +37,15 @@ def _installed_names():
     """
     if not _USER_DIR.is_dir():
         return set()
+
     names = set()
-    for p in _USER_DIR.iterdir():
-        if p.is_dir() and not p.name.startswith((".", "__")):
-            names.add(p.name)
-        elif p.suffix == ".py" and not p.name.startswith((".", "__")):
-            names.add(p.stem)
+    for entry in _USER_DIR.iterdir():
+        if entry.name.startswith((".", "__")):
+            continue
+        if entry.is_dir():
+            names.add(entry.name)
+        elif entry.suffix == ".py":
+            names.add(entry.stem)
     return names
 
 
@@ -53,6 +56,7 @@ def cmd_list():
     if not extensions:
         print("No extensions listed in registry.")
         return
+
     installed = _installed_names()
     for name, info in sorted(extensions.items()):
         marker = " [installed]" if name in installed else ""
@@ -73,31 +77,43 @@ def _resolve_deps(name, extensions, installed):
     be installed (dependencies first).
 
     Uses two sets to detect circular dependencies:
-      - "visiting" tracks the extensions we're currently walking through
+      - "in_progress" tracks the extensions we're currently walking through
         (if we see one again, it's a cycle)
-      - "visited" tracks extensions we've fully resolved
+      - "done" tracks extensions we've fully resolved
     """
     order = []
-    visiting = set()
-    visited = set()
+    in_progress = set()
+    done = set()
 
-    def walk(ext):
-        if ext in visited or ext in installed:
+    def collect_deps(ext):
+        """Recursively collect all dependencies for *ext*."""
+        # Already resolved or already installed — nothing to do
+        if ext in done or ext in installed:
             return
-        if ext in visiting:
-            print(f"sweetroll: circular dependency detected involving '{ext}'", file=sys.stderr)
+
+        # If we're already in the middle of resolving this extension,
+        # that means there's a circular dependency (A needs B needs A)
+        if ext in in_progress:
+            print(f"sweetroll: circular dependency detected involving '{ext}'",
+                  file=sys.stderr)
             sys.exit(1)
+
+        # Make sure this extension actually exists in the registry
         if ext not in extensions:
             print(f"sweetroll: unknown dependency '{ext}'", file=sys.stderr)
             sys.exit(1)
-        visiting.add(ext)
+
+        in_progress.add(ext)
+
+        # Resolve all of this extension's dependencies first
         for dep in extensions[ext].get("depends", []):
-            walk(dep)
-        visiting.discard(ext)
-        visited.add(ext)
+            collect_deps(dep)
+
+        in_progress.discard(ext)
+        done.add(ext)
         order.append(ext)
 
-    walk(name)
+    collect_deps(name)
     return order
 
 
@@ -113,10 +129,12 @@ def _save_deps(name, depends):
             deps = json.loads(_DEPS_FILE.read_text())
         except Exception:
             pass
+
     if depends:
         deps[name] = depends
     elif name in deps:
         del deps[name]
+
     _DEPS_FILE.parent.mkdir(parents=True, exist_ok=True)
     _DEPS_FILE.write_text(json.dumps(deps, indent=2) + "\n")
 
@@ -130,11 +148,14 @@ def cmd_install(name_or_url):
         # Registry install: look up the extension and resolve dependencies
         registry = _fetch_registry()
         extensions = registry.get("extensions", {})
+
         if name_or_url not in extensions:
             print(f"sweetroll: unknown extension '{name_or_url}'", file=sys.stderr)
             sys.exit(1)
+
         installed = _installed_names()
         to_install = _resolve_deps(name_or_url, extensions, installed)
+
         for ext_name in to_install:
             info = extensions[ext_name]
             if ext_name != name_or_url:
@@ -153,8 +174,8 @@ def _install_from_url(url, name):
     try:
         with urllib.request.urlopen(url, timeout=30) as resp:
             data = resp.read()
-    except Exception as e:
-        print(f"sweetroll: download failed: {e}", file=sys.stderr)
+    except Exception as err:
+        print(f"sweetroll: download failed: {err}", file=sys.stderr)
         sys.exit(1)
 
     if url.rstrip("/").endswith(".py"):
@@ -165,8 +186,14 @@ def _install_from_url(url, name):
 
 def _install_single_py(data, url, name):
     """Install a single-file (.py) extension."""
-    # Derive the extension name from the URL filename if not provided
-    ext_name = name or url.rstrip("/").rsplit("/", 1)[-1][:-3]
+    # Figure out the extension name from the URL filename if not provided
+    if name:
+        ext_name = name
+    else:
+        # e.g. "https://example.com/extensions/clipboard.py" -> "clipboard"
+        filename = url.rstrip("/").rsplit("/", 1)[-1]
+        ext_name = filename[:-3]  # remove ".py"
+
     dest = _USER_DIR / f"{ext_name}.py"
 
     if dest.exists():
@@ -178,7 +205,7 @@ def _install_single_py(data, url, name):
 
     _USER_DIR.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(data)
-    print(f"sweetroll: installed '{ext_name}' → {dest}")
+    print(f"sweetroll: installed '{ext_name}' -> {dest}")
 
 
 def _install_zip(data, name):
@@ -189,17 +216,24 @@ def _install_zip(data, name):
         print("sweetroll: downloaded file is not a zip archive", file=sys.stderr)
         sys.exit(1)
 
-    # The zip must contain exactly one top-level directory
-    top_dirs = {p.split("/")[0] for p in zf.namelist() if "/" in p}
+    # The zip must contain exactly one top-level directory.
+    # Find all top-level directory names by looking at file paths in the zip.
+    top_dirs = set()
+    for filepath in zf.namelist():
+        if "/" in filepath:
+            top_dir = filepath.split("/")[0]
+            top_dirs.add(top_dir)
+
     if len(top_dirs) != 1:
         print(
-            f"sweetroll: zip must contain exactly one top-level directory, found: {sorted(top_dirs)}",
+            f"sweetroll: zip must contain exactly one top-level directory, "
+            f"found: {sorted(top_dirs)}",
             file=sys.stderr,
         )
         sys.exit(1)
 
     zip_root = next(iter(top_dirs))
-    ext_name = name or zip_root
+    ext_name = name if name else zip_root
     dest = _USER_DIR / ext_name
 
     if dest.exists():
@@ -212,20 +246,24 @@ def _install_zip(data, name):
     _USER_DIR.mkdir(parents=True, exist_ok=True)
     dest.mkdir()
 
-    # Extract files, stripping the top-level directory prefix from paths
+    # Extract files, stripping the top-level directory prefix from paths.
+    # For example, if the zip contains "clipboard/main.py", we want to
+    # extract it as "~/.sweetroll/extensions/clipboard/main.py".
     prefix = zip_root + "/"
     for member in zf.infolist():
         if not member.filename.startswith(prefix):
             continue
+
         # Get the path relative to the top-level directory
-        rel = member.filename[len(prefix):]
-        if not rel:
+        relative_path = member.filename[len(prefix):]
+        if not relative_path:
             continue
-        target = dest / rel
+
+        target = dest / relative_path
         if member.is_dir():
             target.mkdir(parents=True, exist_ok=True)
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(zf.read(member.filename))
 
-    print(f"sweetroll: installed '{ext_name}' → {dest}")
+    print(f"sweetroll: installed '{ext_name}' -> {dest}")

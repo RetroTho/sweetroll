@@ -54,7 +54,12 @@ def main():
 
     # Otherwise, load extensions and open the editor
     load_extensions()
-    path = args[0] if args else None
+
+    if args:
+        path = args[0]
+    else:
+        path = None
+
     run(path)
 
 

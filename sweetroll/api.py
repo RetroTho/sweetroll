@@ -22,7 +22,7 @@ class EditorAPI:
         self._editor = editor
         self._color_pairs = {}   # maps (fg, bg) tuples to curses pair numbers
         self._next_pair = 1      # next available curses color pair number
-        self._data = {}           # shared key-value store for inter-extension data
+        self._data = {}          # shared key-value store for inter-extension data
 
     # --- Buffer / content ---
 
@@ -32,9 +32,9 @@ class EditorAPI:
 
     def get_line(self, row):
         """Return the line at *row* (0-based).  Returns "" if out of range."""
-        buf = self._editor.buffer
-        if 0 <= row < len(buf.lines):
-            return buf.lines[row]
+        lines = self._editor.buffer.lines
+        if 0 <= row < len(lines):
+            return lines[row]
         return ""
 
     def set_line(self, row, text):
@@ -42,9 +42,11 @@ class EditorAPI:
         buf = self._editor.buffer
         if row < 0:
             return
-        # Extend the buffer if needed so that row exists
+
+        # Extend the buffer if needed so that the row exists
         while len(buf.lines) <= row:
             buf.lines.append("")
+
         buf.lines[row] = text
         buf.dirty = True
         buf.clamp_cursor()
@@ -58,7 +60,10 @@ class EditorAPI:
 
         Pass None to mark the buffer as untitled/unsaved.
         """
-        self._editor.buffer.path = Path(path).resolve() if path is not None else None
+        if path is not None:
+            self._editor.buffer.path = Path(path).resolve()
+        else:
+            self._editor.buffer.path = None
 
     def is_dirty(self):
         """Return True if the buffer has unsaved changes."""
@@ -74,13 +79,17 @@ class EditorAPI:
         Resets the cursor and scroll position.  Any unsaved changes to the
         previous buffer are lost unless the caller saves first.
         """
-        self._editor.buffer.load(Path(path).resolve())
+        resolved = Path(path).resolve()
+        self._editor.buffer.load(resolved)
         self._editor.scroll_y = 0
 
     def replace_lines(self, lines, dirty=True):
         """Replace the entire buffer with *lines*.  Does not change the file path."""
         buf = self._editor.buffer
-        buf.lines = list(lines) if lines else [""]
+        if lines:
+            buf.lines = list(lines)
+        else:
+            buf.lines = [""]
         buf.dirty = dirty
         buf.clamp_cursor()
 
@@ -129,19 +138,23 @@ class EditorAPI:
 
     def request_header_rows(self, n):
         """Request *n* rows for the header area (top of screen)."""
-        self._editor.layout_request["header"] = max(self._editor.layout_request["header"], n)
+        current = self._editor.layout_request["header"]
+        self._editor.layout_request["header"] = max(current, n)
 
     def request_footer_rows(self, n):
         """Request *n* rows for the footer area (bottom of screen)."""
-        self._editor.layout_request["footer"] = max(self._editor.layout_request["footer"], n)
+        current = self._editor.layout_request["footer"]
+        self._editor.layout_request["footer"] = max(current, n)
 
     def request_left_columns(self, n):
         """Request *n* columns for the left sidebar."""
-        self._editor.layout_request["left"] = max(self._editor.layout_request["left"], n)
+        current = self._editor.layout_request["left"]
+        self._editor.layout_request["left"] = max(current, n)
 
     def request_right_columns(self, n):
         """Request *n* columns for the right sidebar."""
-        self._editor.layout_request["right"] = max(self._editor.layout_request["right"], n)
+        current = self._editor.layout_request["right"]
+        self._editor.layout_request["right"] = max(current, n)
 
     def get_content_rect(self):
         """Return (y, x, height, width) of the main text editing area."""
@@ -182,10 +195,14 @@ class EditorAPI:
         Use -1 for fg or bg to mean the terminal's default color.
         """
         key = (fg, bg)
+
+        # If we haven't seen this color combo before, register it with curses
         if key not in self._color_pairs:
-            curses.init_pair(self._next_pair, fg, bg)
-            self._color_pairs[key] = self._next_pair
+            pair_number = self._next_pair
+            curses.init_pair(pair_number, fg, bg)
+            self._color_pairs[key] = pair_number
             self._next_pair += 1
+
         return curses.color_pair(self._color_pairs[key])
 
     # --- Shared data store ---
