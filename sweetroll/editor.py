@@ -460,6 +460,10 @@ class Editor:
 
         return False
 
+    def dispatch_key(self, key):
+        """Fire a key event. Called by api.dispatch_key() — see that method."""
+        _dispatch("key", {"api": self.api, "key": key})
+
     # -- Main loop --
 
     def _curses_main(self, win):
