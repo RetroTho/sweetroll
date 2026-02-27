@@ -1,12 +1,14 @@
 """Extension discovery and loading from ~/.sweetroll/extensions/."""
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
 from sweetroll.editor import register_hook
 
 _USER_DIR = Path.home() / ".sweetroll" / "extensions"
+_DEPS_FILE = Path.home() / ".sweetroll" / "deps.json"
 
 
 def _load_extension(ext_dir: Path):
@@ -61,14 +63,69 @@ def _load_single_file(py_file: Path):
         print(f"sweetroll: warning: {py_file.stem}.setup() failed: {e}", file=sys.stderr)
 
 
+def _read_deps() -> dict[str, list[str]]:
+    """Read the local dependency manifest (~/.sweetroll/deps.json)."""
+    if not _DEPS_FILE.exists():
+        return {}
+    try:
+        return json.loads(_DEPS_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def _sort_by_deps(names: list[str], deps: dict[str, list[str]]) -> list[str]:
+    """Sort extension names so dependencies come before dependents.
+
+    Extensions not mentioned in *deps* keep their original (alphabetical) order
+    and are placed after all dependency-tracked extensions.
+    """
+    order: list[str] = []
+    visited: set[str] = set()
+
+    def walk(name: str):
+        if name in visited:
+            return
+        visited.add(name)
+        for dep in deps.get(name, []):
+            if dep in names:
+                walk(dep)
+        order.append(name)
+
+    # First, resolve all extensions that appear in the dependency graph.
+    for name in names:
+        if name in deps:
+            walk(name)
+
+    # Then, append the rest in their original (sorted) order.
+    for name in names:
+        if name not in visited:
+            order.append(name)
+
+    return order
+
+
 def load_extensions():
-    """Load all extensions from ~/.sweetroll/extensions/."""
+    """Load all extensions from ~/.sweetroll/extensions/ in dependency order."""
     if not _USER_DIR.is_dir():
         return
+
+    # Discover installed extensions.
+    entries: dict[str, Path] = {}
     for entry in sorted(_USER_DIR.iterdir()):
         if entry.name.startswith((".", "__")):
             continue
         if entry.is_dir():
-            _load_extension(entry)
+            entries[entry.name] = entry
         elif entry.suffix == ".py":
-            _load_single_file(entry)
+            entries[entry.stem] = entry
+
+    # Sort so dependencies load first.
+    deps = _read_deps()
+    load_order = _sort_by_deps(list(entries.keys()), deps)
+
+    for name in load_order:
+        path = entries[name]
+        if path.is_dir():
+            _load_extension(path)
+        else:
+            _load_single_file(path)
