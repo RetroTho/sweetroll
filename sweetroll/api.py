@@ -232,9 +232,5 @@ class EditorAPI:
         "ctrl_shift_z") that extensions agree on as a convention.  Every
         "key" hook will be called with this key just as if the user had
         pressed it themselves.
-
-        This is mainly used by low-level extensions like extended_keys that
-        read raw escape sequences and want to turn them into named events for
-        other extensions to react to.
         """
         self._editor.dispatch_key(key)
