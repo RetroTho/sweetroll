@@ -1,4 +1,4 @@
-"""Minimal terminal editor with a simple hook system and extension API."""
+"""Sweetroll: a minimal, extensible terminal text editor."""
 
 __all__ = ["run", "register_hook", "EditorAPI"]
 

@@ -1,4 +1,10 @@
-"""Extension registry: fetch, list, and install extensions from a remote index."""
+"""Extension registry: fetch, list, and install extensions from a remote index.
+
+The registry is a JSON file hosted on GitHub that lists available extensions,
+their descriptions, download URLs, and dependencies.  This module handles
+fetching that registry, listing what's available, resolving dependencies,
+and downloading/installing extensions into ~/.sweetroll/extensions/.
+"""
 
 import json
 import sys
@@ -11,7 +17,11 @@ from sweetroll.loader import _USER_DIR, _DEPS_FILE
 REGISTRY_URL = "https://raw.githubusercontent.com/RetroTho/sweetroll-registry/main/registry.json"
 
 
-def _fetch_registry() -> dict:
+def _fetch_registry():
+    """Download and parse the registry JSON from GitHub.
+
+    Exits the program with an error message if the download fails.
+    """
     try:
         with urllib.request.urlopen(REGISTRY_URL, timeout=10) as resp:
             return json.loads(resp.read())
@@ -20,7 +30,11 @@ def _fetch_registry() -> dict:
         sys.exit(1)
 
 
-def _installed_names() -> set[str]:
+def _installed_names():
+    """Return a set of extension names that are already installed locally.
+
+    Checks ~/.sweetroll/extensions/ for directories and .py files.
+    """
     if not _USER_DIR.is_dir():
         return set()
     names = set()
@@ -33,7 +47,7 @@ def _installed_names() -> set[str]:
 
 
 def cmd_list():
-    """Print extensions available in the registry."""
+    """Print all extensions available in the registry, with install status."""
     registry = _fetch_registry()
     extensions = registry.get("extensions", {})
     if not extensions:
@@ -51,17 +65,23 @@ def cmd_list():
             print(f"    depends: {', '.join(depends)}")
 
 
-def _resolve_deps(name: str, extensions: dict, installed: set[str]) -> list[str]:
-    """Return a list of extensions to install (in order) so all dependencies are met.
+def _resolve_deps(name, extensions, installed):
+    """Figure out which extensions need to be installed (in order) for *name*.
 
-    Walks the dependency tree for *name*, skipping anything already installed.
-    Raises SystemExit on circular or unknown dependencies.
+    Walks the dependency tree starting from *name*.  Skips anything already
+    installed.  Returns a list of extension names in the order they should
+    be installed (dependencies first).
+
+    Uses two sets to detect circular dependencies:
+      - "visiting" tracks the extensions we're currently walking through
+        (if we see one again, it's a cycle)
+      - "visited" tracks extensions we've fully resolved
     """
-    order: list[str] = []
-    visiting: set[str] = set()   # tracks the current path (cycle detection)
-    visited: set[str] = set()    # tracks fully resolved names
+    order = []
+    visiting = set()
+    visited = set()
 
-    def walk(ext: str):
+    def walk(ext):
         if ext in visited or ext in installed:
             return
         if ext in visiting:
@@ -81,8 +101,12 @@ def _resolve_deps(name: str, extensions: dict, installed: set[str]) -> list[str]
     return order
 
 
-def _save_deps(name: str, depends: list[str]):
-    """Update ~/.sweetroll/deps.json with dependency info for *name*."""
+def _save_deps(name, depends):
+    """Update ~/.sweetroll/deps.json after installing an extension.
+
+    Records which extensions *name* depends on, so the loader can sort
+    them correctly at startup.
+    """
     deps = {}
     if _DEPS_FILE.exists():
         try:
@@ -97,11 +121,13 @@ def _save_deps(name: str, depends: list[str]):
     _DEPS_FILE.write_text(json.dumps(deps, indent=2) + "\n")
 
 
-def cmd_install(name_or_url: str):
+def cmd_install(name_or_url):
     """Install an extension by registry name or direct URL."""
     if name_or_url.startswith(("http://", "https://")):
+        # Direct URL install (no dependency resolution)
         _install_from_url(name_or_url, name=None)
     else:
+        # Registry install: look up the extension and resolve dependencies
         registry = _fetch_registry()
         extensions = registry.get("extensions", {})
         if name_or_url not in extensions:
@@ -117,7 +143,12 @@ def cmd_install(name_or_url: str):
             _save_deps(ext_name, info.get("depends", []))
 
 
-def _install_from_url(url: str, name: str | None):
+def _install_from_url(url, name):
+    """Download an extension from *url* and install it.
+
+    Figures out whether it's a single .py file or a zip archive, then
+    delegates to the appropriate installer.
+    """
     print(f"Downloading {url} ...")
     try:
         with urllib.request.urlopen(url, timeout=30) as resp:
@@ -126,28 +157,39 @@ def _install_from_url(url: str, name: str | None):
         print(f"sweetroll: download failed: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Single-file extension: URL ends with .py
     if url.rstrip("/").endswith(".py"):
-        ext_name = name or url.rstrip("/").rsplit("/", 1)[-1][:-3]
-        dest = _USER_DIR / f"{ext_name}.py"
-        if dest.exists():
-            print(
-                f"sweetroll: '{ext_name}' is already installed. Remove {dest} to reinstall.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        _USER_DIR.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(data)
-        print(f"sweetroll: installed '{ext_name}' → {dest}")
-        return
+        _install_single_py(data, url, name)
+    else:
+        _install_zip(data, name)
 
-    # Zip-based extension
+
+def _install_single_py(data, url, name):
+    """Install a single-file (.py) extension."""
+    # Derive the extension name from the URL filename if not provided
+    ext_name = name or url.rstrip("/").rsplit("/", 1)[-1][:-3]
+    dest = _USER_DIR / f"{ext_name}.py"
+
+    if dest.exists():
+        print(
+            f"sweetroll: '{ext_name}' is already installed. Remove {dest} to reinstall.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    _USER_DIR.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(data)
+    print(f"sweetroll: installed '{ext_name}' → {dest}")
+
+
+def _install_zip(data, name):
+    """Install a zip-based extension (a directory with __init__.py, etc.)."""
     try:
         zf = zipfile.ZipFile(BytesIO(data))
     except zipfile.BadZipFile:
         print("sweetroll: downloaded file is not a zip archive", file=sys.stderr)
         sys.exit(1)
 
+    # The zip must contain exactly one top-level directory
     top_dirs = {p.split("/")[0] for p in zf.namelist() if "/" in p}
     if len(top_dirs) != 1:
         print(
@@ -170,10 +212,12 @@ def _install_from_url(url: str, name: str | None):
     _USER_DIR.mkdir(parents=True, exist_ok=True)
     dest.mkdir()
 
+    # Extract files, stripping the top-level directory prefix from paths
     prefix = zip_root + "/"
     for member in zf.infolist():
         if not member.filename.startswith(prefix):
             continue
+        # Get the path relative to the top-level directory
         rel = member.filename[len(prefix):]
         if not rel:
             continue

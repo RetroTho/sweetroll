@@ -1,4 +1,12 @@
-"""Entry point: sweetroll [file] | sweetroll ext <subcommand>"""
+"""Command-line entry point for sweetroll.
+
+Usage:
+  sweetroll                     Open the editor with an empty buffer
+  sweetroll FILE                Open FILE for editing
+  sweetroll ext list            List extensions available in the registry
+  sweetroll ext install NAME    Install an extension by registry name
+  sweetroll ext install URL     Install an extension from a direct URL
+"""
 
 import sys
 
@@ -13,7 +21,8 @@ Usage:
 """
 
 
-def _cmd_ext(args: list[str]):
+def _cmd_ext(args):
+    """Handle the 'sweetroll ext' subcommands (list, install)."""
     if not args:
         print(_EXT_USAGE, end="")
         sys.exit(0)
@@ -38,10 +47,12 @@ def _cmd_ext(args: list[str]):
 def main():
     args = sys.argv[1:]
 
+    # If the first argument is "ext", handle extension management commands
     if args and args[0] == "ext":
         _cmd_ext(args[1:])
         return
 
+    # Otherwise, load extensions and open the editor
     load_extensions()
     path = args[0] if args else None
     run(path)

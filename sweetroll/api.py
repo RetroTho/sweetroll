@@ -1,74 +1,84 @@
-"""Editor API: stable extension surface for buffer, cursor, viewport, events, and shared data."""
+"""Editor API: the interface that extensions use to interact with the editor.
+
+Extensions never touch the Editor or Buffer directly.  Instead, every hook
+receives an EditorAPI object (as payload["api"]) which provides safe methods
+for reading/changing the buffer, moving the cursor, controlling the viewport,
+requesting screen regions, managing colors, and sharing data between extensions.
+"""
 
 import curses
-
 from pathlib import Path
-from typing import Any
-
-# Rect is (y, x, height, width)
-LayoutRect = tuple[int, int, int, int]
 
 
 class EditorAPI:
-    """
-    Extension-facing API. Created by the core once per run and passed in every hook payload as payload["api"].
-    Core owns the main loop, buffer, and main text rendering; extensions use this API and hooks only.
+    """Extension-facing API.
+
+    Created once per editor session and passed in every hook payload as
+    payload["api"].  The core owns the main loop, buffer, and text rendering;
+    extensions use this API and hooks only.
     """
 
-    def __init__(self, editor: Any):
+    def __init__(self, editor):
         self._editor = editor
-        self._color_pairs: dict[tuple[int, int], int] = {}
-        self._next_pair: int = 1
-        self._data: dict[str, Any] = {}
+        self._color_pairs = {}   # maps (fg, bg) tuples to curses pair numbers
+        self._next_pair = 1      # next available curses color pair number
+        self._data = {}           # shared key-value store for inter-extension data
 
     # --- Buffer / content ---
 
-    def get_lines(self) -> list[str]:
+    def get_lines(self):
         """Return a copy of all buffer lines."""
         return list(self._editor.buffer.lines)
 
-    def get_line(self, row: int) -> str:
-        """Return the line at row (0-based)."""
+    def get_line(self, row):
+        """Return the line at *row* (0-based).  Returns "" if out of range."""
         buf = self._editor.buffer
         if 0 <= row < len(buf.lines):
             return buf.lines[row]
         return ""
 
-    def set_line(self, row: int, text: str) -> None:
-        """Set the line at row (0-based). Clamps row. Marks buffer dirty."""
+    def set_line(self, row, text):
+        """Replace the line at *row* with *text*.  Marks buffer dirty."""
         buf = self._editor.buffer
         if row < 0:
             return
+        # Extend the buffer if needed so that row exists
         while len(buf.lines) <= row:
             buf.lines.append("")
         buf.lines[row] = text
         buf.dirty = True
         buf.clamp_cursor()
 
-    def get_path(self) -> Path | None:
-        """Return the buffer file path, or None if unsaved."""
+    def get_path(self):
+        """Return the buffer's file path, or None if the file has never been saved."""
         return self._editor.buffer.path
 
-    def set_path(self, path: Path | str | None) -> None:
-        """Set the buffer file path without loading. path None for unsaved/unnamed."""
+    def set_path(self, path):
+        """Set the buffer's file path without loading anything from disk.
+
+        Pass None to mark the buffer as untitled/unsaved.
+        """
         self._editor.buffer.path = Path(path).resolve() if path is not None else None
 
-    def is_dirty(self) -> bool:
-        """Return whether the buffer has unsaved changes."""
+    def is_dirty(self):
+        """Return True if the buffer has unsaved changes."""
         return self._editor.buffer.dirty
 
-    def save(self) -> bool:
-        """Save buffer to path. Returns False if no path."""
+    def save(self):
+        """Save the buffer to its file path.  Returns False if no path is set."""
         return self._editor.buffer.save()
 
-    def load_file(self, path: Path | str) -> None:
-        """Load file into buffer (replacing current content), update path/cursor/scroll/dirty.
-        Unsaved changes to the current buffer are discarded unless the caller saves first."""
+    def load_file(self, path):
+        """Load a file into the buffer, replacing the current contents.
+
+        Resets the cursor and scroll position.  Any unsaved changes to the
+        previous buffer are lost unless the caller saves first.
+        """
         self._editor.buffer.load(Path(path).resolve())
         self._editor.scroll_y = 0
 
-    def replace_lines(self, lines: list[str], dirty: bool = True) -> None:
-        """Replace entire buffer content. Clamps cursor. Does not change path."""
+    def replace_lines(self, lines, dirty=True):
+        """Replace the entire buffer with *lines*.  Does not change the file path."""
         buf = self._editor.buffer
         buf.lines = list(lines) if lines else [""]
         buf.dirty = dirty
@@ -76,13 +86,13 @@ class EditorAPI:
 
     # --- Cursor ---
 
-    def get_cursor(self) -> tuple[int, int]:
-        """Return (row, col) 0-based."""
+    def get_cursor(self):
+        """Return (row, col), both 0-based."""
         buf = self._editor.buffer
         return (buf.row, buf.col)
 
-    def set_cursor(self, row: int, col: int) -> None:
-        """Set cursor position (0-based). Clamped to buffer bounds."""
+    def set_cursor(self, row, col):
+        """Move the cursor to (row, col).  Automatically clamped to buffer bounds."""
         buf = self._editor.buffer
         buf.row = row
         buf.col = col
@@ -90,79 +100,87 @@ class EditorAPI:
 
     # --- Viewport ---
 
-    def get_size(self) -> tuple[int, int]:
-        """Return (height, width) of the window."""
+    def get_size(self):
+        """Return (height, width) of the terminal window."""
         return self._editor.win.getmaxyx()
 
-    def get_scroll_y(self) -> int:
-        """Return current scroll offset (top line index)."""
+    def get_scroll_y(self):
+        """Return the vertical scroll offset (which line is at the top of the screen)."""
         return self._editor.scroll_y
 
-    def set_scroll_y(self, y: int) -> None:
-        """Set scroll offset (top line index). Clamped to >= 0."""
+    def set_scroll_y(self, y):
+        """Set the vertical scroll offset.  Clamped to >= 0."""
         self._editor.scroll_y = max(0, y)
 
-    def get_scroll_x(self) -> int:
-        """Return current horizontal scroll offset (leftmost visible column)."""
+    def get_scroll_x(self):
+        """Return the horizontal scroll offset (which column is at the left edge)."""
         return self._editor.scroll_x
 
-    def set_scroll_x(self, x: int) -> None:
-        """Set horizontal scroll offset. Clamped to >= 0."""
+    def set_scroll_x(self, x):
+        """Set the horizontal scroll offset.  Clamped to >= 0."""
         self._editor.scroll_x = max(0, x)
 
-    # --- Layout regions (call request_* during "layout" hook) ---
+    # --- Layout regions ---
+    #
+    # Extensions call the request_* methods during the "layout" hook to
+    # reserve screen space (e.g. a status bar requests 1 footer row).
+    # After layout, the get_*_rect methods return the computed position of
+    # each region as a (y, x, height, width) tuple, or None if empty.
 
-    def request_header_rows(self, n: int) -> None:
-        """Request n rows for the header area. Call during the layout hook. Max of all requests is used."""
+    def request_header_rows(self, n):
+        """Request *n* rows for the header area (top of screen)."""
         self._editor.layout_request["header"] = max(self._editor.layout_request["header"], n)
 
-    def request_footer_rows(self, n: int) -> None:
-        """Request n rows for the footer area. Call during the layout hook. Max of all requests is used."""
+    def request_footer_rows(self, n):
+        """Request *n* rows for the footer area (bottom of screen)."""
         self._editor.layout_request["footer"] = max(self._editor.layout_request["footer"], n)
 
-    def request_left_columns(self, n: int) -> None:
-        """Request n columns for the left sidebar. Call during the layout hook. Max of all requests is used."""
+    def request_left_columns(self, n):
+        """Request *n* columns for the left sidebar."""
         self._editor.layout_request["left"] = max(self._editor.layout_request["left"], n)
 
-    def request_right_columns(self, n: int) -> None:
-        """Request n columns for the right sidebar. Call during the layout hook. Max of all requests is used."""
+    def request_right_columns(self, n):
+        """Request *n* columns for the right sidebar."""
         self._editor.layout_request["right"] = max(self._editor.layout_request["right"], n)
 
-    def get_content_rect(self) -> LayoutRect | None:
-        """Return (y, x, height, width) of the main text area, or None."""
+    def get_content_rect(self):
+        """Return (y, x, height, width) of the main text editing area."""
         return self._editor.layout_rects.get("content_rect")
 
-    def get_header_rect(self) -> LayoutRect | None:
-        """Return (y, x, height, width) of the header region, or None if zero size."""
+    def get_header_rect(self):
+        """Return (y, x, height, width) of the header, or None if no header."""
         return self._editor.layout_rects.get("header_rect")
 
-    def get_footer_rect(self) -> LayoutRect | None:
-        """Return (y, x, height, width) of the footer region, or None if zero size."""
+    def get_footer_rect(self):
+        """Return (y, x, height, width) of the footer, or None if no footer."""
         return self._editor.layout_rects.get("footer_rect")
 
-    def get_left_rect(self) -> LayoutRect | None:
-        """Return (y, x, height, width) of the left sidebar region, or None if zero size."""
+    def get_left_rect(self):
+        """Return (y, x, height, width) of the left sidebar, or None if no sidebar."""
         return self._editor.layout_rects.get("left_rect")
 
-    def get_right_rect(self) -> LayoutRect | None:
-        """Return (y, x, height, width) of the right sidebar region, or None if zero size."""
+    def get_right_rect(self):
+        """Return (y, x, height, width) of the right sidebar, or None if no sidebar."""
         return self._editor.layout_rects.get("right_rect")
 
-    # --- Status ---
+    # --- Status message ---
 
-    def get_message(self) -> str:
-        """Return the current message."""
+    def get_message(self):
+        """Return the current status message."""
         return self._editor.message
 
-    def set_message(self, msg: str) -> None:
-        """Set the message."""
+    def set_message(self, msg):
+        """Set the status message (shown by a status bar extension, if installed)."""
         self._editor.message = msg
 
     # --- Colors ---
 
-    def color_pair(self, fg: int, bg: int) -> int:
-        """Return a curses color attr for fg/bg. Registers the pair on first use.
-        Use -1 for fg or bg to mean the terminal's default color."""
+    def color_pair(self, fg, bg):
+        """Return a curses color attribute for the given foreground/background.
+
+        Registers the color pair with curses on first use and caches it.
+        Use -1 for fg or bg to mean the terminal's default color.
+        """
         key = (fg, bg)
         if key not in self._color_pairs:
             curses.init_pair(self._next_pair, fg, bg)
@@ -170,18 +188,22 @@ class EditorAPI:
             self._next_pair += 1
         return curses.color_pair(self._color_pairs[key])
 
-    # --- Shared extension data store ---
+    # --- Shared data store ---
+    #
+    # Extensions can store and retrieve arbitrary data here so they can
+    # communicate with each other (e.g. the selection extension stores
+    # "selection.anchor" so the clipboard extension can read it).
 
-    def set_data(self, key: str, value: Any) -> None:
-        """Store a value under key. Extensions use this to share state."""
+    def set_data(self, key, value):
+        """Store a value under *key* for other extensions to read."""
         self._data[key] = value
 
-    def get_data(self, key: str, default: Any = None) -> Any:
-        """Retrieve a value previously set by set_data. Returns default if not found."""
+    def get_data(self, key, default=None):
+        """Retrieve a value set by set_data.  Returns *default* if not found."""
         return self._data.get(key, default)
 
-    # --- Low-level for overlays ---
+    # --- Low-level access ---
 
-    def get_win(self) -> Any:
-        """Return the curses window for drawing overlays."""
+    def get_win(self):
+        """Return the raw curses window (for extensions that draw overlays)."""
         return self._editor.win
