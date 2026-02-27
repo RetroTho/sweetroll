@@ -1,6 +1,6 @@
 """Editor API: the interface that extensions use to interact with the editor.
 
-Extensions never touch the Editor or Buffer directly.  Instead, every hook
+Extensions never touch the Editor or Buffer directly. Instead, every hook
 receives an EditorAPI object (as payload["api"]) which provides safe methods
 for reading/changing the buffer, moving the cursor, controlling the viewport,
 requesting screen regions, managing colors, and sharing data between extensions.
@@ -14,7 +14,7 @@ class EditorAPI:
     """Extension-facing API.
 
     Created once per editor session and passed in every hook payload as
-    payload["api"].  The core owns the main loop, buffer, and text rendering;
+    payload["api"]. The core owns the main loop, buffer, and text rendering;
     extensions use this API and hooks only.
     """
 
@@ -31,14 +31,14 @@ class EditorAPI:
         return list(self._editor.buffer.lines)
 
     def get_line(self, row):
-        """Return the line at *row* (0-based).  Returns "" if out of range."""
+        """Return the line at `row` (0-based). Returns "" if out of range."""
         lines = self._editor.buffer.lines
         if 0 <= row < len(lines):
             return lines[row]
         return ""
 
     def set_line(self, row, text):
-        """Replace the line at *row* with *text*.  Marks buffer dirty."""
+        """Replace the line at `row` with `text`. Marks buffer dirty."""
         buf = self._editor.buffer
         if row < 0:
             return
@@ -70,13 +70,13 @@ class EditorAPI:
         return self._editor.buffer.dirty
 
     def save(self):
-        """Save the buffer to its file path.  Returns False if no path is set."""
+        """Save the buffer to its file path. Returns False if no path is set."""
         return self._editor.buffer.save()
 
     def load_file(self, path):
         """Load a file into the buffer, replacing the current contents.
 
-        Resets the cursor and scroll position.  Any unsaved changes to the
+        Resets the cursor and scroll position. Any unsaved changes to the
         previous buffer are lost unless the caller saves first.
         """
         resolved = Path(path).resolve()
@@ -84,7 +84,7 @@ class EditorAPI:
         self._editor.scroll_y = 0
 
     def replace_lines(self, lines, dirty=True):
-        """Replace the entire buffer with *lines*.  Does not change the file path."""
+        """Replace the entire buffer with `lines`. Does not change the file path."""
         buf = self._editor.buffer
         if lines:
             buf.lines = list(lines)
@@ -101,7 +101,7 @@ class EditorAPI:
         return (buf.row, buf.col)
 
     def set_cursor(self, row, col):
-        """Move the cursor to (row, col).  Automatically clamped to buffer bounds."""
+        """Move the cursor to (row, col). Automatically clamped to buffer bounds."""
         buf = self._editor.buffer
         buf.row = row
         buf.col = col
@@ -118,7 +118,7 @@ class EditorAPI:
         return self._editor.scroll_y
 
     def set_scroll_y(self, y):
-        """Set the vertical scroll offset.  Clamped to >= 0."""
+        """Set the vertical scroll offset. Clamped to >= 0."""
         self._editor.scroll_y = max(0, y)
 
     def get_scroll_x(self):
@@ -126,7 +126,7 @@ class EditorAPI:
         return self._editor.scroll_x
 
     def set_scroll_x(self, x):
-        """Set the horizontal scroll offset.  Clamped to >= 0."""
+        """Set the horizontal scroll offset. Clamped to >= 0."""
         self._editor.scroll_x = max(0, x)
 
     # --- Layout regions ---
@@ -137,22 +137,22 @@ class EditorAPI:
     # each region as a (y, x, height, width) tuple, or None if empty.
 
     def request_header_rows(self, n):
-        """Request *n* rows for the header area (top of screen)."""
+        """Request `n` rows for the header area (top of screen)."""
         current = self._editor.layout_request["header"]
         self._editor.layout_request["header"] = max(current, n)
 
     def request_footer_rows(self, n):
-        """Request *n* rows for the footer area (bottom of screen)."""
+        """Request `n` rows for the footer area (bottom of screen)."""
         current = self._editor.layout_request["footer"]
         self._editor.layout_request["footer"] = max(current, n)
 
     def request_left_columns(self, n):
-        """Request *n* columns for the left sidebar."""
+        """Request `n` columns for the left sidebar."""
         current = self._editor.layout_request["left"]
         self._editor.layout_request["left"] = max(current, n)
 
     def request_right_columns(self, n):
-        """Request *n* columns for the right sidebar."""
+        """Request `n` columns for the right sidebar."""
         current = self._editor.layout_request["right"]
         self._editor.layout_request["right"] = max(current, n)
 
@@ -212,11 +212,11 @@ class EditorAPI:
     # "selection.anchor" so the clipboard extension can read it).
 
     def set_data(self, key, value):
-        """Store a value under *key* for other extensions to read."""
+        """Store a value under `key` for other extensions to read."""
         self._data[key] = value
 
     def get_data(self, key, default=None):
-        """Retrieve a value set by set_data.  Returns *default* if not found."""
+        """Retrieve a value set by set_data. Returns `default` if not found."""
         return self._data.get(key, default)
 
     # --- Low-level access ---

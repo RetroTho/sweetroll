@@ -5,7 +5,7 @@ dependencies load before the extensions that need them, then dynamically
 imports each one and calls its setup() function.
 
 Extensions can be either:
-  - A directory with an __init__.py  (package extension)
+  - A directory with an __init__.py (package extension)
   - A single .py file               (single-file extension)
 """
 
@@ -29,7 +29,7 @@ def _import_and_setup(module_name, file_path, display_name):
     """Import a Python file as a module and call its setup(register_hook).
 
     This is the shared logic used for both directory-based and single-file
-    extensions.  If anything goes wrong (bad import, missing setup function,
+    extensions. If anything goes wrong (bad import, missing setup function,
     setup error), a warning is printed to stderr and the extension is skipped.
     """
     # Step 1: dynamically import the file as a Python module.
@@ -98,7 +98,7 @@ def _sort_by_deps(names, deps):
     For example, if "clipboard" depends on "selection", then "selection" must
     appear before "clipboard" in the result.
 
-    Uses a depth-first walk through the dependency graph.  Extensions that
+    Uses a depth-first walk through the dependency graph. Extensions that
     aren't mentioned in the deps manifest keep their original (alphabetical)
     order and are placed after all dependency-tracked extensions.
     """
@@ -106,7 +106,7 @@ def _sort_by_deps(names, deps):
     visited = set()
 
     def add_with_deps(name):
-        """Add *name* to the order list, but first add all of its dependencies."""
+        """Add `name` to the order list, but first add all of its dependencies."""
         if name in visited:
             return
         visited.add(name)

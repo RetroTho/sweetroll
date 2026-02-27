@@ -145,11 +145,11 @@ class Buffer:
 # ---------------------------------------------------------------------------
 #
 # Hooks let extensions react to editor events (like "a key was pressed" or
-# "the screen is about to be drawn").  Each hook is a Python function that
-# gets called with (event_name, payload).  Extensions register hooks via
+# "the screen is about to be drawn"). Each hook is a Python function that
+# gets called with (event_name, payload). Extensions register hooks via
 # register_hook(), and the editor calls _dispatch() to run them.
 
-# Global list of registered hooks.  Each entry is (priority, callback, event).
+# Global list of registered hooks. Each entry is (priority, callback, event).
 _hooks = []
 
 
@@ -167,7 +167,7 @@ def register_hook(priority, callback, event=None):
 
 
 def _dispatch(event, payload):
-    """Run all hooks registered for *event* in priority order.
+    """Run all hooks registered for the given event in priority order.
 
     If any hook returns True, we stop early and return True (meaning
     "this event was handled, don't do the default behavior").
@@ -195,7 +195,7 @@ def _dispatch(event, payload):
 # ---------------------------------------------------------------------------
 
 class Editor:
-    """The main editor object.  Owns the buffer, the curses window, and the
+    """The main editor object. Owns the buffer, the curses window, and the
     event loop that reads keys and redraws the screen."""
 
     def __init__(self, path):
@@ -205,7 +205,7 @@ class Editor:
         self.message = ""        # one-line message (shown by status-bar extension)
 
         # Layout: extensions can request header/footer rows and left/right
-        # columns.  These dicts are recalculated every frame.
+        # columns. These dicts are recalculated every frame.
         self.layout_request = {"header": 0, "footer": 0, "left": 0, "right": 0}
         self.layout_rects = {}
 
@@ -380,7 +380,7 @@ class Editor:
     # -- Keyboard handling --
 
     def on_key(self, key):
-        """Handle a single keypress.  Returns "quit" to exit, True if handled."""
+        """Handle a single keypress. Returns "quit" to exit, True if handled."""
         # Let extensions handle the key first
         handled_by_extension = _dispatch("key", {"api": self.api, "key": key})
 
@@ -463,7 +463,7 @@ class Editor:
     # -- Main loop --
 
     def _curses_main(self, win):
-        """The function passed to curses.wrapper.  Sets up the editor, then
+        """The function passed to curses.wrapper. Sets up the editor, then
         loops: draw the screen, wait for a key, handle it, repeat."""
         self._init_curses(win)
         self.api = EditorAPI(editor=self)
@@ -490,7 +490,7 @@ class Editor:
 
 
 def run(path=None):
-    """Run the editor.  *path* is an optional file to open."""
+    """Run the editor. `path` is an optional file to open."""
     if path:
         resolved = Path(path).resolve()
     else:

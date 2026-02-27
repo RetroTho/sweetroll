@@ -1,7 +1,7 @@
 """Extension registry: fetch, list, and install extensions from a remote index.
 
 The registry is a JSON file hosted on GitHub that lists available extensions,
-their descriptions, download URLs, and dependencies.  This module handles
+their descriptions, download URLs, and dependencies. This module handles
 fetching that registry, listing what's available, resolving dependencies,
 and downloading/installing extensions into ~/.sweetroll/extensions/.
 """
@@ -70,10 +70,10 @@ def cmd_list():
 
 
 def _resolve_deps(name, extensions, installed):
-    """Figure out which extensions need to be installed (in order) for *name*.
+    """Figure out which extensions need to be installed (in order) for `name`.
 
-    Walks the dependency tree starting from *name*.  Skips anything already
-    installed.  Returns a list of extension names in the order they should
+    Walks the dependency tree starting from `name`. Skips anything already
+    installed. Returns a list of extension names in the order they should
     be installed (dependencies first).
 
     Uses two sets to detect circular dependencies:
@@ -86,7 +86,7 @@ def _resolve_deps(name, extensions, installed):
     done = set()
 
     def collect_deps(ext):
-        """Recursively collect all dependencies for *ext*."""
+        """Recursively collect all dependencies for `ext`."""
         # Already resolved or already installed — nothing to do
         if ext in done or ext in installed:
             return
@@ -120,7 +120,7 @@ def _resolve_deps(name, extensions, installed):
 def _save_deps(name, depends):
     """Update ~/.sweetroll/deps.json after installing an extension.
 
-    Records which extensions *name* depends on, so the loader can sort
+    Records which extensions `name` depends on, so the loader can sort
     them correctly at startup.
     """
     deps = {}
@@ -165,7 +165,7 @@ def cmd_install(name_or_url):
 
 
 def _install_from_url(url, name):
-    """Download an extension from *url* and install it.
+    """Download an extension from `url` and install it.
 
     Figures out whether it's a single .py file or a zip archive, then
     delegates to the appropriate installer.
