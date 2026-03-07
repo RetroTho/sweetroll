@@ -419,6 +419,10 @@ class Editor:
         if key == curses.KEY_LEFT:
             if self.buffer.col > 0:
                 self.buffer.col -= 1
+            elif self.buffer.row > 0:
+                self.buffer.row -= 1
+                self.buffer.col = len(self.buffer.lines[self.buffer.row])
+                self.buffer.clamp_cursor()
             return True
 
         if key == curses.KEY_RIGHT:
