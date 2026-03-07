@@ -156,9 +156,9 @@ _hooks = []
 def register_hook(priority, callback, event=None):
     """Register a hook function.
 
-    priority  – lower numbers run first (0 before 10 before 50, etc.)
-    callback  – function(event_name, payload) to call
-    event     – if given, only call this hook for that specific event name;
+    priority  - lower numbers run first (0 before 10 before 50, etc.)
+    callback  - function(event_name, payload) to call
+    event     - if given, only call this hook for that specific event name;
                 if None, the hook is called for every event
     """
     _hooks.append((priority, callback, event))
@@ -426,22 +426,10 @@ class Editor:
                 self.buffer.col += 1
             return True
 
-        if key == curses.KEY_HOME:
-            self.buffer.col = 0
-            return True
-
-        if key == curses.KEY_END:
-            self.buffer.col = len(self.buffer.lines[self.buffer.row])
-            return True
-
         # --- Editing ---
 
         if key in BACKSPACE_CODES:
             self.buffer.backspace()
-            return True
-
-        if key == curses.KEY_DC:
-            self.buffer.delete_char()
             return True
 
         if key in KEY_ENTER_CODES:
