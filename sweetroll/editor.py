@@ -209,6 +209,9 @@ class Editor:
         self.layout_request = {"header": 0, "footer": 0, "left": 0, "right": 0}
         self.layout_rects = {}
 
+        self.poll_interval = None        # ms between poll cycles, or None to block
+        self.cursor_display_row = None   # visual cursor row override, or None
+
         self.win = None          # the curses window (set in _init_curses)
         self.api = None          # the EditorAPI wrapper (set in run)
 
@@ -341,9 +344,14 @@ class Editor:
                 pass
 
     def _position_cursor(self):
-        """Move the terminal cursor to match the buffer cursor position."""
+        """Move the terminal cursor to match the buffer cursor position.
+
+        If cursor_display_row is set (by an extension), the cursor is shown
+        at that row instead of the buffer's actual row.
+        """
         content_y, content_x, _, _ = self.layout_rects["content_rect"]
-        cursor_y = content_y + (self.buffer.row - self.scroll_y)
+        row = self.cursor_display_row if self.cursor_display_row is not None else self.buffer.row
+        cursor_y = content_y + (row - self.scroll_y)
         cursor_x = content_x + (self.buffer.col - self.scroll_x)
         try:
             self.win.move(cursor_y, cursor_x)
@@ -467,9 +475,18 @@ class Editor:
 
         while True:
             self.redraw()
-            # getch() blocks until the user presses a key, then returns
-            # an integer key code
+
+            # If poll_interval is set, poll periodically instead of
+            # blocking.  This lets extensions update the screen without
+            # waiting for a keypress.
+            timeout = self.poll_interval if self.poll_interval is not None else -1
+            win.timeout(timeout)
             key = win.getch()
+            win.timeout(-1)
+
+            if key == -1:
+                continue  # timeout — no key pressed, just redraw
+
             result = self.on_key(key)
             if result == "quit":
                 break

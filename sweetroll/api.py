@@ -129,6 +129,38 @@ class EditorAPI:
         """Set the horizontal scroll offset. Clamped to >= 0."""
         self._editor.scroll_x = max(0, x)
 
+    # --- Polling ---
+
+    def set_poll_interval(self, ms):
+        """Request periodic screen redraws every `ms` milliseconds.
+
+        When set, the editor polls for keypresses instead of blocking.
+        This lets extensions update the display without user input.
+        """
+        self._editor.poll_interval = ms
+
+    def clear_poll_interval(self):
+        """Stop polling and return to blocking mode."""
+        self._editor.poll_interval = None
+
+    # --- Cursor display ---
+
+    def set_cursor_display_row(self, row):
+        """Override where the cursor appears on screen.
+
+        The actual cursor position in the buffer is unchanged.  This lets
+        overlay extensions position the cursor correctly inside a modified display.
+        """
+        self._editor.cursor_display_row = row
+
+    def get_cursor_display_row(self):
+        """Return the display row override, or None if not set."""
+        return self._editor.cursor_display_row
+
+    def clear_cursor_display_row(self):
+        """Remove the cursor display override (cursor follows buffer position)."""
+        self._editor.cursor_display_row = None
+
     # --- Layout regions ---
     #
     # Extensions call the request_* methods during the "layout" hook to
